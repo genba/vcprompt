@@ -52,6 +52,7 @@ import re
 import shlex
 import signal
 import sys
+import threading
 
 try:
     import sqlite3
@@ -66,7 +67,7 @@ except ImportError:
 # user editable options
 FORMAT = os.environ.get('VCPROMPT_FORMAT', '%s:%b')
 UNKNOWN = os.environ.get('VCPROMPT_UNKNOWN', '(unknown)')
-TIMEOUT = os.environ.get('VCPROMPT_TIMEOUT', 0)
+TIMEOUT = os.environ.get('VCPROMPT_TIMEOUT', 1000) # milliseconds
 SYSTEMS = []
 
 # status indicators
@@ -200,6 +201,14 @@ def vcprompt(options):
     return ''
 
 
+def abort():
+    try:
+        err_retval = errno.ETIME # doesn't seem to be available in Python 2.7 on Windows
+    except AttributeError:
+        err_retval = errno.ETIMEDOUT
+    os._exit(err_retval)
+
+
 def main():
     parser = optparse.OptionParser()
     parser.remove_option('--help')
@@ -207,7 +216,7 @@ def main():
     parser.add_option('-f', '--format', dest='format', default=FORMAT)
     parser.add_option('-p', '--path', dest='path', default='.')
     parser.add_option('-s', '--systems', action='callback', callback=systems)
-    parser.add_option('-t', '--timeout', dest='timeout', default=TIMEOUT, type='int')
+    parser.add_option('-t', '--timeout', dest='timeout', default=TIMEOUT, type='int') # timeout in milliseconds
     parser.add_option('-A', '--staged', dest='staged', default=STAGED)
     parser.add_option('-M', '--modified', dest='modified', default=MODIFIED)
     parser.add_option('-U', '--untracked', dest='untracked', default=UNTRACKED)
@@ -226,14 +235,10 @@ def main():
 
     # set max execution time
     # exit with status errno.ETIME if timeout is reached
+	# timeout must be passed to 'threading.Timer' in seconds
     timeout = float(options.timeout) / 1000
-    signal.signal(signal.SIGALRM, lambda x, y: sys.exit(errno.ETIME))
-
-    # Use setitimer on Python 2.6+
-    try:
-        signal.setitimer(signal.ITIMER_REAL, timeout)
-    except AttributeError:
-        signal.alarm(int(round(timeout)))
+    timer = threading.Timer(timeout, abort)
+    timer.start()
 
     output = vcprompt(options)
     return output
